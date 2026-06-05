@@ -2,6 +2,10 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+# ignore training checkpoints and large training state files
 *.pt
+!policy.pt
 runs/
 .DS_Store
+# MacOS
+~$*

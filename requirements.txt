@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+python-multipart
+numpy
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1+cpu

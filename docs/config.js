@@ -1,0 +1,1 @@
+window.LAOBAN_API_BASE = 'https://laoban-pkjw.onrender.com';

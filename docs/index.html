@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Laoban • 5/10/K</title>
+  <link rel="icon" href="./favicon.ico" sizes="any">
+  <link rel="shortcut icon" href="./favicon.ico">
+  <meta name="description" content="Play 5/10/K against the Laoban bot." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div>
+        <h1>Laoban • 老板</h1>
+        <p class="subtitle">5/10/K cardroom</p>
+      </div>
+      <div class="top-controls">
+        <label>
+          <span>First move</span>
+          <select id="starting-player">
+            <option value="me">Me</option>
+            <option value="bot">Bot</option>
+          </select>
+        </label>
+        <button id="new-game-btn">New Game</button>
+      </div>
+    </header>
+
+    <div id="meta" class="meta">
+      Frontend ready. Connecting to backend…
+    </div>
+
+    <div class="layout">
+      <main class="panel table-panel">
+        <section class="opponent-area">
+          <h2>Opponent</h2>
+          <div id="opponent-status" class="muted"></div>
+          <div id="opponent-hand" class="card-row"></div>
+        </section>
+
+        <section class="table-center">
+          <aside class="panel deck-stack inset">
+            <div class="deck-title">DRAW PILE</div>
+            <div class="deck-cards">
+              <div class="card back offset-a"><div class="back-center"></div></div>
+              <div class="card back offset-b"><div class="back-center"></div></div>
+              <div class="card back offset-c"><div class="back-center"></div></div>
+            </div>
+            <div id="deck-size" class="deck-count">0 cards</div>
+          </aside>
+
+          <div class="status-center">
+            <div class="panel status-chip inset">
+              <div id="status">You 0 · Bot 0 · Pot 0</div>
+              <div id="turn" class="muted">Turn: —</div>
+              <div id="wins" class="muted">Wins - You: 0 · Bot: 0</div>
+            </div>
+
+            <div id="last-move" class="last-move">Last move: None</div>
+            <div id="table-cards" class="card-row table-row empty-state">No active table move</div>
+            <div id="result" class="result"></div>
+
+            <div class="center-controls">
+              <button id="play-btn">Play Selected</button>
+              <button id="pass-btn" class="danger">Pass</button>
+              <button id="clear-btn" class="secondary">Clear</button>
+            </div>
+
+            <div id="selection" class="selection">No cards selected.</div>
+          </div>
+        </section>
+
+        <section class="human-area">
+          <h2>Your Hand</h2>
+          <div id="human-hand" class="card-row"></div>
+          <p class="muted hint">
+            Playable cards glow green. Click exact cards to form a legal move, or use the move browser.
+          </p>
+        </section>
+      </main>
+
+      <aside class="panel sidebar">
+        <section>
+          <h2>Move Browser</h2>
+          <p class="muted">Click a legal move to select it. Double-click to play it immediately.</p>
+          <div id="moves" class="moves"></div>
+        </section>
+
+        <section class="log-wrap">
+          <h2>Action Log</h2>
+          <pre id="log" class="log"></pre>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

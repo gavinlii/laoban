@@ -1,0 +1,1704 @@
+:root {
+  --table-dark: #081d17;
+  --table-green: #0d3f31;
+  --panel-bg: #10291f;
+  --panel-alt: #153528;
+  --light-text: #f9f2d7;
+  --muted-text: #c9bea0;
+  --accent: #f4c75b;
+  --accent-dark: #b88928;
+  --playable-border: #84ef9b;
+  --selected-border: #ffd76e;
+  --paper: #f4efde;
+  --shadow: rgba(0, 0, 0, .78);
+  --mono: Menlo, Monaco, Consolas, monospace;
+  --ui: 'Trebuchet MS', 'Segoe UI', sans-serif;
+  --card-w: 90px;
+  --card-h: 126px;
+  --lift-top: 12px;
+  --lift-bottom: 8px;
+  --card-shell-h: calc(var(--card-h) + var(--lift-top) + var(--lift-bottom));
+  --card-gap: 8px;
+  --deck-col-w: 188px;
+  --point-rail-w: 344px;
+  --table-axis-shift: calc((var(--point-rail-w) - var(--deck-col-w)) / 2);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--table-dark);
+  color: var(--light-text);
+  font-family: var(--ui);
+  overflow: hidden;
+}
+
+.page {
+  height: 100dvh;
+  padding: 8px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  color: var(--muted-text);
+  font-size: 12px;
+}
+
+.top-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.top-controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-text);
+  font-size: 12px;
+}
+
+
+.coffee-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.coffee-btn-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+
+select, button {
+  font: inherit;
+  border: 0;
+  border-radius: 12px;
+  outline: none;
+}
+
+select {
+  background: var(--accent);
+  color: #101010;
+  padding: 7px 12px;
+  font-weight: 700;
+}
+
+button {
+  background: var(--accent);
+  color: #101010;
+  padding: 8px 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background .16s ease, transform .16s ease, opacity .16s ease, box-shadow .16s ease;
+}
+button:hover:not(:disabled) { transform: translateY(-1px); }
+button:active:not(:disabled) { transform: translateY(0); }
+button:focus-visible { box-shadow: 0 0 0 2px rgba(244, 199, 91, .25); }
+button:disabled {
+  background: #cec5b5;
+  color: #6b6b6b;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+button.danger { background: #d96b6b; }
+button.secondary { background: #91a090; }
+button.danger:hover:not(:disabled) { background: #c85e5e; }
+button.secondary:hover:not(:disabled) { background: #7f8d7e; }
+
+.meta, .panel {
+  border: 2px solid var(--accent-dark);
+  border-radius: 12px;
+}
+
+.meta {
+  background: var(--panel-alt);
+  color: var(--muted-text);
+  padding: 8px 14px;
+  margin-bottom: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 12px;
+}
+
+.panel {
+  background: var(--panel-bg);
+  min-height: 0;
+}
+
+.table-panel {
+  background: var(--table-green);
+  padding: 10px 16px 16px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  row-gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sidebar {
+  padding: 12px 12px 14px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  min-height: 0;
+}
+
+.sidebar h2, .table-panel h2 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  line-height: 1.05;
+  text-align: center;
+}
+
+.muted {
+  color: var(--muted-text);
+  text-align: center;
+}
+
+.opponent-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 104px;
+}
+
+.card-row {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--card-gap);
+  flex-wrap: nowrap;
+}
+
+#opponent-hand.card-row,
+#human-hand.card-row { min-height: var(--card-shell-h); }
+#human-hand.card-row { padding-bottom: 8px; }
+
+.table-center {
+  display: grid;
+  grid-template-columns: var(--deck-col-w) minmax(0, 1fr) var(--point-rail-w);
+  align-items: stretch;
+  min-height: 0;
+  padding-top: 2px;
+}
+
+.table-center::after {
+  content: '';
+  display: none;
+}
+
+.deck-stack {
+  grid-column: 1;
+  align-self: start;
+  justify-self: start;
+  width: 176px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 34px;
+  background: transparent;
+  border: 0;
+}
+
+.deck-title {
+  color: var(--muted-text);
+  font-weight: 800;
+  letter-spacing: .08em;
+  font-size: 11px;
+}
+
+.deck-cards {
+  position: relative;
+  width: 150px;
+  height: 174px;
+}
+
+.deck-cards .card-shell {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+.deck-cards .offset-a { left: 20px; top: 18px; }
+.deck-cards .offset-b { left: 28px; top: 10px; }
+.deck-cards .offset-c { left: 36px; top: 2px; }
+
+.deck-count {
+  min-width: 110px;
+  text-align: center;
+  padding: 7px 14px;
+  border: 2px solid var(--accent-dark);
+  border-radius: 9px;
+  background: rgba(21, 53, 40, .42);
+  font-weight: 800;
+}
+
+.status-center {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 0;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.status-chip {
+  background: rgba(20, 59, 46, .42);
+  padding: 12px 24px 14px;
+  min-width: 322px;
+  text-align: center;
+}
+
+#status {
+  font-size: 23px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+#turn, #wins {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.last-move {
+  font-size: 18px;
+  font-weight: 800;
+  text-align: center;
+  min-height: 24px;
+}
+
+.table-row {
+  width: 100%;
+  min-height: 154px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.table-row.empty-state {
+  color: var(--muted-text);
+  font-style: italic;
+}
+
+.table-type {
+  color: var(--accent);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-align: center;
+}
+
+.table-play-row { min-height: var(--card-shell-h); }
+
+.result {
+  min-height: 24px;
+  color: var(--accent);
+  font-size: 18px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.center-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+}
+
+.selection {
+  min-height: 20px;
+  text-align: center;
+}
+
+.human-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.hint {
+  margin: 0;
+  font-size: 11px;
+}
+
+.moves {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.move {
+  background: var(--paper);
+  color: #1b1b1b;
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.move:hover { background: #f8f3e7; }
+.move.selected { outline: 2px solid #2d5643; }
+.move.disabled { cursor: default; color: #555; }
+.move.pass { font-weight: 800; }
+
+.log-wrap {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.log {
+  margin: 8px 0 0;
+  background: var(--paper);
+  color: #1b1b1b;
+  border-radius: 16px;
+  padding: 12px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.card-shell {
+  position: relative;
+  width: var(--card-w);
+  height: var(--card-shell-h);
+  flex: 0 0 auto;
+  user-select: none;
+}
+
+.card-body,
+.card-shadow {
+  position: absolute;
+  left: 0;
+  width: var(--card-w);
+  height: var(--card-h);
+}
+
+.card-body {
+  top: var(--lift-top);
+  transform: translateY(0);
+  transition: transform .14s ease, filter .14s ease;
+}
+
+.card-glow,
+.card-plate {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--card-w);
+  height: var(--card-h);
+}
+
+.card-glow {
+  border-radius: 13px;
+  opacity: 0;
+  transition: opacity .14s ease, box-shadow .14s ease;
+}
+
+.card-shadow {
+  top: calc(var(--lift-top) + 8px);
+  transform: translateX(4px);
+  background: var(--shadow);
+  clip-path: polygon(12% 0%, 88% 0%, 100% 10%, 100% 90%, 88% 100%, 12% 100%, 0% 90%, 0% 10%);
+  filter: saturate(.7);
+}
+
+
+.card-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.card-shell.playable:not(.selected) .card-glow {
+  opacity: 1;
+  box-shadow: 0 0 0 3px var(--playable-border), 0 0 14px rgba(132, 239, 155, .16);
+}
+
+.card-shell.selected .card-glow {
+  opacity: 1;
+  box-shadow: 0 0 0 4px var(--selected-border), 0 0 15px rgba(255, 215, 110, .18);
+}
+
+.card-shell.clickable:hover .card-body { transform: translateY(-7px); }
+.card-shell.selected .card-body { transform: translateY(-6px); }
+.card-shell.clickable.selected:hover .card-body { transform: translateY(-8px); }
+
+.card-shell.clickable:hover .card-shadow { transform: translateX(4px) translateY(-2px); }
+.card-shell.selected .card-shadow { transform: translateX(4px) translateY(-2px); }
+
+.card-shell.back .card-shadow { opacity: .78; }
+
+
+.point-rail {
+  grid-column: 3;
+  align-self: stretch;
+  justify-self: center;
+  width: var(--point-rail-w);
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0 12px;
+  gap: 28px;
+}
+
+.point-pile-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-height: 236px;
+}
+
+.point-pile-wrap.is-empty {
+  visibility: hidden;
+}
+
+.point-pile-label {
+  color: var(--muted-text);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.point-pile {
+  position: relative;
+  min-height: var(--card-shell-h);
+  width: 100%;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.point-stack-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: none;
+  pointer-events: none;
+}
+
+.point-stack-card .card-body,
+.point-stack-card .card-shadow {
+  transition: none;
+}
+
+.point-stack-card .card-shadow {
+  opacity: .62;
+}
+
+
+
+@media (min-width: 981px) {
+  .opponent-area,
+  .human-area {
+    position: relative;
+    transform: translateX(calc(var(--table-axis-shift) * -1));
+  }
+
+  .opponent-area {
+    gap: 6px;
+    padding-bottom: 8px;
+  }
+
+  .human-area {
+    gap: 10px;
+    padding-top: 12px;
+  }
+
+  .opponent-area h2,
+  .human-area h2 {
+    margin-bottom: 0;
+  }
+}
+
+.error { color: #ffb6b6; }
+code { font-family: var(--mono); }
+
+@media (max-width: 1400px) {
+  .layout { grid-template-columns: minmax(0, 1fr) 286px; }
+  .status-chip { min-width: 308px; }
+}
+
+
+.selection.waiting-backend {
+  color: #ff8f8f;
+  font-weight: 800;
+}
+
+.intro-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  opacity: 1;
+  transition: opacity .18s ease;
+}
+
+.intro-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 14, 11, .66);
+  backdrop-filter: blur(2px);
+  transition: opacity .18s ease;
+}
+
+.intro-modal {
+  position: relative;
+  z-index: 1;
+  width: min(860px, calc(100vw - 48px));
+  max-height: min(760px, calc(100vh - 40px));
+  overflow: auto;
+  background: rgba(16, 41, 31, .97);
+  border: 2px solid var(--accent-dark);
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .42);
+  padding: 22px 24px 18px;
+  transform: translateY(0) scale(1);
+  opacity: 1;
+  transition: transform .18s ease, opacity .18s ease;
+}
+
+
+.intro-topnote {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(244, 199, 91, .35);
+  border-radius: 11px;
+  background: rgba(244, 199, 91, .08);
+}
+
+.intro-topnote-title {
+  font-size: 17px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.intro-topnote-body {
+  color: var(--light-text);
+  line-height: 1.45;
+  font-size: 14px;
+}
+
+.intro-slides {
+  min-height: 280px;
+}
+
+.intro-slide-counter {
+  color: var(--muted-text);
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.intro-title {
+  margin: 0 0 10px;
+  text-align: left;
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.intro-body p {
+  margin: 0 0 12px;
+  color: var(--light-text);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.intro-controls {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.intro-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.intro-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  padding: 0;
+  background: rgba(255,255,255,.22);
+}
+
+.intro-dot.active {
+  background: var(--accent);
+}
+
+.intro-footer {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+.intro-gotit {
+  min-width: 108px;
+}
+
+@media (max-width: 720px) {
+  .intro-modal {
+    width: calc(100vw - 24px);
+    padding: 18px 16px 16px;
+  }
+
+  .intro-title {
+    font-size: 23px;
+  }
+
+  .intro-body p {
+    font-size: 14px;
+  }
+}
+
+
+.intro-overlay.closing {
+  opacity: 0;
+}
+
+.intro-overlay.closing .intro-backdrop {
+  opacity: 0;
+}
+
+.intro-overlay.closing .intro-modal {
+  opacity: 0;
+  transform: translateY(8px) scale(.985);
+}
+
+button,
+select,
+.move,
+.card-shell.clickable {
+  touch-action: manipulation;
+}
+
+@media (max-width: 980px) and (hover: none),
+       (max-width: 980px) and (pointer: coarse) {
+  body {
+    overflow: auto;
+  }
+
+  .page {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding: 10px 10px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .top-controls {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .meta {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+    align-content: start;
+  }
+
+  .table-panel,
+  .sidebar {
+    min-height: auto;
+  }
+
+  .table-panel {
+    order: 1;
+    overflow: visible;
+    grid-template-rows: auto auto auto;
+  }
+
+  .sidebar {
+    order: 2;
+    grid-template-rows: auto auto;
+  }
+
+  .table-center {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding-top: 8px;
+  }
+
+  .table-center::after {
+    display: none;
+  }
+
+  .deck-stack,
+  .status-center {
+    grid-column: auto;
+    justify-self: center;
+    width: 100%;
+  }
+
+  .deck-stack {
+    width: min(100%, 220px);
+  }
+
+  .status-chip {
+    min-width: 0;
+    width: 100%;
+    max-width: 480px;
+  }
+
+  .table-row {
+    min-height: 0;
+  }
+
+  .center-controls {
+    flex-wrap: wrap;
+  }
+
+  .card-row {
+    width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 6px 8px;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table-play-row {
+    justify-content: center;
+  }
+
+  .moves {
+    grid-template-columns: 1fr;
+  }
+
+  .log {
+    max-height: 240px;
+  }
+}
+
+@media (max-width: 720px) and (hover: none),
+       (max-width: 720px) and (pointer: coarse) {
+  :root {
+    --card-w: 72px;
+    --card-h: 101px;
+    --lift-top: 10px;
+    --lift-bottom: 7px;
+    --card-gap: 6px;
+  }
+
+  .page {
+    padding: 8px 8px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .topbar h1 {
+    font-size: 26px;
+  }
+
+  .sidebar h2,
+  .table-panel h2 {
+    font-size: 19px;
+  }
+
+  #status {
+    font-size: 20px;
+  }
+
+  .last-move,
+  .result {
+    font-size: 16px;
+  }
+
+  .deck-cards {
+    width: 126px;
+    height: 150px;
+  }
+
+  .deck-cards .offset-a { left: 10px; top: 16px; }
+  .deck-cards .offset-b { left: 18px; top: 8px; }
+  .deck-cards .offset-c { left: 26px; top: 0; }
+
+  .intro-controls {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .intro-nav {
+    width: 100%;
+  }
+
+  .intro-dots {
+    order: 3;
+  }
+}
+
+@media (max-width: 520px) and (hover: none),
+       (max-width: 520px) and (pointer: coarse) {
+  :root {
+    --card-w: 62px;
+    --card-h: 87px;
+    --lift-top: 9px;
+    --lift-bottom: 6px;
+    --card-gap: 5px;
+  }
+
+  select,
+  button {
+    min-height: 44px;
+  }
+
+  .top-controls {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .top-controls label {
+    flex-wrap: wrap;
+  }
+
+  .status-chip {
+    padding: 10px 14px 12px;
+  }
+
+  .deck-count {
+    min-width: 0;
+    width: 100%;
+    max-width: 180px;
+  }
+
+  .log {
+    font-size: 10px;
+  }
+}
+
+@media (hover: none) {
+  button:hover:not(:disabled) {
+    transform: none;
+  }
+
+  .move:hover {
+    background: var(--paper);
+  }
+
+  .card-body,
+  .card-shadow {
+    transition: none;
+  }
+
+  .card-shell.clickable:hover .card-body,
+  .card-shell.clickable.selected:hover .card-body,
+  .card-shell.selected .card-body {
+    transform: translateY(0);
+  }
+
+  .card-shell.clickable:hover .card-shadow,
+  .card-shell.selected .card-shadow {
+    transform: translateX(4px);
+  }
+}
+
+
+@media (min-width: 981px) and (max-height: 1100px) {
+  body {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .page {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding: 6px 12px 8px;
+  }
+
+  .layout {
+    align-content: start;
+  }
+
+  .table-panel,
+  .sidebar {
+    min-height: auto;
+  }
+
+  .table-panel {
+    overflow: visible;
+    padding: 8px 14px 12px;
+  }
+
+  .sidebar {
+    overflow: visible;
+    padding: 10px 10px 12px;
+    gap: 8px;
+  }
+
+  .table-center {
+    align-items: start;
+    padding-top: 0;
+  }
+
+  .deck-stack {
+    padding-top: 12px;
+  }
+
+  .status-center {
+    padding-top: 4px;
+    gap: 6px;
+  }
+
+  .topbar {
+    margin-bottom: 6px;
+  }
+
+  .meta {
+    margin-bottom: 8px;
+  }
+}
+
+@media (min-width: 981px) and (max-height: 1040px) {
+  :root {
+    --card-w: 80px;
+    --card-h: 112px;
+    --lift-top: 10px;
+    --lift-bottom: 7px;
+    --card-gap: 7px;
+  }
+
+  .page {
+    padding: 6px 12px 8px;
+  }
+
+  .topbar h1 {
+    font-size: 28px;
+  }
+
+  .subtitle,
+  .meta,
+  .top-controls label,
+  #turn,
+  #wins,
+  .hint {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 286px;
+    gap: 10px;
+  }
+
+  .sidebar h2,
+  .table-panel h2 {
+    font-size: 20px;
+  }
+
+  .opponent-area {
+    min-height: 0;
+    gap: 0;
+  }
+
+  .table-center {
+    grid-template-columns: 168px minmax(0, 1fr) 320px;
+    padding-top: 0;
+  }
+
+  .deck-stack {
+    width: 160px;
+    gap: 6px;
+    padding-top: 8px;
+  }
+
+  .deck-cards {
+    width: 134px;
+    height: 156px;
+  }
+
+  .deck-cards .offset-a { left: 14px; top: 15px; }
+  .deck-cards .offset-b { left: 22px; top: 8px; }
+  .deck-cards .offset-c { left: 30px; top: 0; }
+
+  .deck-count {
+    padding: 6px 12px;
+  }
+
+  .status-center {
+    padding-top: 2px;
+    gap: 6px;
+  }
+
+  .status-chip {
+    min-width: 272px;
+    padding: 10px 18px 11px;
+  }
+
+  #status {
+    font-size: 20px;
+  }
+
+  .last-move,
+  .result {
+    font-size: 16px;
+    min-height: 20px;
+  }
+
+  .table-row {
+    min-height: 128px;
+    gap: 7px;
+  }
+
+  .human-area {
+    gap: 4px;
+    padding-top: 2px;
+  }
+
+  #human-hand.card-row {
+    padding-bottom: 6px;
+  }
+
+  .center-controls {
+    gap: 8px;
+  }
+
+  .moves {
+    gap: 5px;
+    margin-top: 8px;
+  }
+
+  .move {
+    padding: 6px 9px;
+    font-size: 11px;
+  }
+
+  .log {
+    margin-top: 6px;
+    padding: 10px;
+  }
+}
+
+@media (min-width: 1280px) and (min-aspect-ratio: 2/1) and (max-height: 920px),
+       (min-width: 981px) and (max-height: 920px) {
+  :root {
+    --card-w: 76px;
+    --card-h: 106px;
+    --lift-top: 10px;
+    --lift-bottom: 6px;
+    --card-gap: 6px;
+  }
+
+  .page {
+    padding: 6px 10px 8px;
+  }
+
+  .topbar {
+    gap: 10px;
+  }
+
+  .topbar h1 {
+    font-size: 25px;
+  }
+
+  .top-controls {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .meta {
+    padding: 7px 12px;
+    font-size: 10.5px;
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 268px;
+    gap: 9px;
+  }
+
+  .table-panel {
+    padding: 8px 12px 12px;
+  }
+
+  .sidebar {
+    padding: 9px 9px 10px;
+    gap: 7px;
+  }
+
+  .sidebar h2,
+  .table-panel h2 {
+    font-size: 18px;
+  }
+
+  .table-center {
+    grid-template-columns: 156px minmax(0, 1fr) 300px;
+    gap: 8px;
+  }
+
+  .deck-stack {
+    width: 150px;
+  }
+
+  .deck-cards {
+    width: 126px;
+    height: 146px;
+  }
+
+  .deck-cards .offset-a { left: 12px; top: 14px; }
+  .deck-cards .offset-b { left: 20px; top: 7px; }
+  .deck-cards .offset-c { left: 28px; top: 0; }
+
+  .status-chip {
+    min-width: 0;
+    width: min(100%, 320px);
+    padding: 9px 14px 10px;
+  }
+
+  #status {
+    font-size: 19px;
+  }
+
+  .table-row {
+    min-height: 118px;
+    gap: 6px;
+  }
+
+  .result,
+  .last-move {
+    font-size: 15px;
+  }
+
+  .center-controls {
+    flex-wrap: wrap;
+  }
+
+  select,
+  button {
+    padding: 7px 12px;
+  }
+
+  .log {
+    max-height: 220px;
+    font-size: 10px;
+  }
+}
+
+
+@media (min-width: 981px) and (max-height: 1040px) {
+  .point-rail {
+    width: 320px;
+    padding: 6px 0 8px;
+    gap: 20px;
+  }
+
+  .point-pile-wrap {
+    min-height: 170px;
+    gap: 8px;
+  }
+}
+
+@media (min-width: 1280px) and (min-aspect-ratio: 2/1) and (max-height: 920px),
+       (min-width: 981px) and (max-height: 920px) {
+  .point-rail {
+    width: 300px;
+    gap: 16px;
+  }
+
+  .point-pile-wrap {
+    min-height: 158px;
+  }
+}
+
+@media (max-width: 980px) and (hover: none),
+       (max-width: 980px) and (pointer: coarse) {
+  .point-rail {
+    grid-column: auto;
+    justify-self: center;
+    width: 100%;
+    max-width: 520px;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 4px 0 0;
+    gap: 12px;
+  }
+
+  .point-pile-wrap {
+    width: calc(50% - 6px);
+    min-height: 168px;
+  }
+}
+
+@media (max-width: 720px) and (hover: none),
+       (max-width: 720px) and (pointer: coarse) {
+  .point-rail {
+    max-width: 380px;
+    gap: 10px;
+  }
+
+  .point-pile-wrap {
+    min-height: 150px;
+  }
+}
+
+
+/* Desktop viewport lock: keep the playing surface height constant and let the action log scroll inside it. */
+@media (min-width: 981px) {
+  body {
+    overflow: hidden;
+  }
+
+  .page {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    padding-top: 14px;
+    padding-bottom: 4px;
+  }
+
+  .topbar {
+    margin-bottom: 10px;
+  }
+
+  .meta {
+    margin-bottom: 10px;
+  }
+
+  .layout {
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
+    align-items: stretch;
+  }
+
+  .table-panel,
+  .sidebar {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .table-panel {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .sidebar {
+    grid-template-rows: auto minmax(0, 1fr);
+    align-self: stretch;
+  }
+
+  .log-wrap {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .log {
+    min-height: 0;
+    height: 100%;
+    max-height: none;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+@media (min-width: 981px) and (max-height: 1100px) {
+  body {
+    overflow: hidden;
+  }
+
+  .page {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    padding-top: 12px;
+    padding-bottom: 4px;
+  }
+
+  .table-panel,
+  .sidebar {
+    overflow: hidden;
+  }
+
+  .log {
+    max-height: none;
+  }
+}
+
+@media (min-width: 981px) and (max-height: 920px) {
+  .page {
+    padding-top: 10px;
+    padding-bottom: 3px;
+  }
+}
+
+
+/* Desktop sidebar lock: move browser and action log scroll inside a fixed-height sidebar, never resizing the playing surface. */
+@media (min-width: 981px) {
+  .layout {
+    align-items: stretch;
+  }
+
+  .table-panel,
+  .sidebar {
+    max-height: 100%;
+  }
+
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 100%;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+  }
+
+  .sidebar > * {
+    flex: 0 0 auto;
+    min-height: 0;
+  }
+
+  .moves {
+    flex: 0 1 238px;
+    min-height: 0;
+    max-height: 238px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+  }
+
+  .log-wrap {
+    flex: 1 1 0;
+    min-height: 0;
+    height: auto;
+    overflow: hidden;
+  }
+
+  .log {
+    min-height: 0;
+    height: 100%;
+    max-height: none;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+@media (min-width: 981px) and (max-height: 1040px) {
+  .moves {
+    flex-basis: 220px;
+    max-height: 220px;
+  }
+}
+
+@media (min-width: 981px) and (max-height: 920px) {
+  .moves {
+    flex-basis: 196px;
+    max-height: 196px;
+  }
+}
+
+
+/* Desktop vertical balance tweak: shift the whole page slightly downward and use more of the bottom edge without changing the fixed in-game panel heights. */
+@media (min-width: 981px) {
+  .page {
+    margin-top: 10px;
+    height: calc(100dvh - 10px);
+    padding-top: 6px;
+    padding-bottom: 0;
+  }
+
+  .meta {
+    margin-bottom: 12px;
+  }
+
+  .layout {
+    margin-top: 2px;
+  }
+}
+
+@media (min-width: 981px) and (max-height: 920px) {
+  .page {
+    margin-top: 8px;
+    height: calc(100dvh - 8px);
+    padding-top: 4px;
+  }
+}
+
+/* Final desktop envelope tweak: keep the top spacing that now feels right,
+   but let the main game row actually consume the remaining viewport height,
+   eliminating the lingering bottom deadspace. */
+@media (min-width: 981px) {
+  .page {
+    margin-top: 0;
+    height: 100dvh;
+    min-height: 0;
+    padding-top: 14px;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+
+  .topbar {
+    margin-bottom: 10px;
+  }
+
+  .meta {
+    margin-bottom: 12px;
+  }
+
+  .layout {
+    flex: 1 1 0;
+    height: auto;
+    min-height: 0;
+    margin-top: 0;
+    align-items: stretch;
+  }
+
+  .table-panel,
+  .sidebar {
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+  }
+}
+
+@media (min-width: 981px) and (max-height: 920px) {
+  .page {
+    padding-top: 12px;
+    padding-bottom: 0;
+  }
+}
+
+/* Final desktop envelope lock: use the viewport explicitly so the game row always
+   consumes the remaining height and the bottom gold borders sit ~2-3% above the
+   true bottom of the window. */
+@media (min-width: 981px) {
+  .page {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    height: 100dvh;
+    min-height: 100dvh;
+    margin: 0;
+    padding-top: 14px;
+    padding-right: 14px;
+    padding-left: 14px;
+    padding-bottom: clamp(18px, 2.4dvh, 30px);
+    overflow: hidden;
+    align-content: start;
+  }
+
+  .topbar {
+    margin-bottom: 10px;
+  }
+
+  .meta {
+    margin-bottom: 12px;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 12px;
+    height: 100%;
+    min-height: 0;
+    align-items: stretch;
+    align-content: stretch;
+  }
+
+  .table-panel,
+  .sidebar {
+    align-self: stretch;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+  }
+}
+
+@media (min-width: 981px) and (max-width: 1400px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 286px;
+  }
+}
+
+@media (min-width: 981px) and (max-height: 920px) {
+  .page {
+    padding-bottom: clamp(14px, 2dvh, 22px);
+  }
+}
+
+/* Desktop position tune from attached baseline:
+   - keep the draw pile vertically centered in the playing surface
+   - move the central scorebug-to-selection stack downward as a group
+   - nudge the opponent label/hand block slightly downward */
+@media (min-width: 981px) {
+  .deck-stack {
+    align-self: center;
+    padding-top: 0;
+  }
+
+  .status-center {
+    justify-content: center;
+    padding-top: 0;
+    transform: translateY(clamp(56px, 7vh, 92px));
+  }
+
+  .opponent-area {
+    transform: translateX(calc(var(--table-axis-shift) * -1)) translateY(clamp(14px, 1.8vh, 24px));
+  }
+}
+
+@media (min-width: 981px) and (max-height: 920px) {
+  .status-center {
+    transform: translateY(clamp(34px, 5vh, 60px));
+  }
+
+  .opponent-area {
+    transform: translateX(calc(var(--table-axis-shift) * -1)) translateY(clamp(10px, 1.2vh, 16px));
+  }
+}
+
+@media (min-width: 981px) {
+  .opponent-area h2 {
+    margin-bottom: 6px;
+  }
+}
+
+@media (min-width: 981px) and (max-height: 920px) {
+  .opponent-area h2 {
+    margin-bottom: 5px;
+  }
+}
+
+@media (min-width: 981px) {
+  .center-controls {
+    margin-top: 8px;
+    margin-bottom: 16px;
+  }
+
+  .selection {
+    min-height: 20px;
+    text-align: center;
+    margin: 0 0 16px;
+  }
+
+  .human-area {
+    padding-top: 0;
+  }
+}
+
+@media (min-width: 981px) and (max-height: 920px) {
+  .center-controls {
+    margin-top: 6px;
+    margin-bottom: 14px;
+  }
+
+  .selection {
+    margin: 0 0 14px;
+  }
+}
+
+/* Condensed active move display: hide the old "Last move: None" line entirely,
+   and reuse that slot for the single gold move label positioned between the old
+   last-move line and the card row. */
+.last-move.hidden-line {
+  display: none;
+}
+
+.last-move.condensed-active-move-line {
+  display: block;
+  color: var(--accent);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  line-height: 1.1;
+  text-align: center;
+  min-height: 24px;
+  margin: 0;
+  transform: translateY(clamp(8px, 1.1vh, 12px));
+}
+
+.result:empty {
+  display: none;
+}
+
+.table-play-row.condensed-active-row {
+  margin-top: 0;
+}
+
+
+@media (min-width: 981px) and (max-height: 920px) {
+  .selection {
+    transform: translateY(6px);
+  }
+}
+
+@media (min-width: 981px) {
+  .point-rail {
+    transform: translateX(calc(var(--table-axis-shift) * -0.5));
+  }
+  .sidebar > h2:first-of-type {
+    margin-top: 16px;
+  }
+  .selection {
+    transform: translateY(8px);
+  }
+}

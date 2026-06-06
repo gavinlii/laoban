@@ -37,8 +37,14 @@ from collections import defaultdict
 import numpy as np
 import torch
 
-from game import GameEnv, Move
-from endgame import endgame_value_from_env
+from game import GameEnv, Move, RANKS, HISTORY_MAXLEN
+from endgame import endgame_value_from_env, endgame_act_from_infoset, ALL_CARDS
+from encoder import encode_state, encode_move
+from model import HISTORY_EVENT_DIM, encode_history_events
+
+# Value-head output is in (margin / POINT_SCALE) units; multiply to recover margin.
+# MUST match train_ppo.POINT_SCALE so the search leaves are on the same scale.
+POINT_SCALE = 10.0
 
 UCB_C = 1.5       # exploration constant
 MAX_SIMS = 80     # simulations per decision (raise for stronger play / more time)
@@ -88,7 +94,6 @@ class ISMCTSPlayer:
 
         # Exact endgame: delegate immediately
         if infoset.get("deck_size", 1) == 0:
-            from endgame import endgame_act_from_infoset
             return endgame_act_from_infoset(infoset)
 
         me = infoset["player_index"]
@@ -166,7 +171,6 @@ class ISMCTSPlayer:
 
     def _rollout(self, env, me, depth_so_far):
         """Short rollout then bootstrap with the value net."""
-        from train_ppo import value_from_infoset, ModelPlayer
         env = copy.deepcopy(env)
         steps = 0
         while not env.done and steps < self.depth:
@@ -176,7 +180,6 @@ class ISMCTSPlayer:
                     self._memo[key] = endgame_value_from_env(env, me)
                 return self._memo[key]
             cur = env.current_player
-            legal = env.get_legal_actions(cur)
             info = env.get_infoset(cur)
             # Use the model's policy for rollout (informed, fast)
             act = self._net_act(info, greedy=False)
@@ -184,15 +187,13 @@ class ISMCTSPlayer:
             steps += 1
         if env.done:
             return env.points[me] - env.points[1 - me]
-        from train_ppo import value_from_infoset, POINT_SCALE
+        # Bootstrap with the value head (already in margin/POINT_SCALE units).
         info = env.get_infoset(me)
-        return POINT_SCALE * value_from_infoset(self.model, self.device, info)
+        _, val = self._policy_priors(info)
+        return POINT_SCALE * val
 
     def _net_act(self, infoset, greedy=True):
         """Sample (or pick best) action from the neural net policy."""
-        from encoder import encode_state, encode_move
-        from train_ppo import HISTORY_EVENT_DIM
-        from train_ppo import encode_history_events
         legal = infoset["legal_actions"]
         state = encode_state(infoset)
         hist = encode_history_events(infoset)
@@ -200,8 +201,7 @@ class ISMCTSPlayer:
         with torch.no_grad():
             st = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
             hlen = len(hist)
-            import numpy as np2
-            ht = torch.from_numpy(hist if hlen else np2.zeros((0, HISTORY_EVENT_DIM), dtype=np2.float32)).float().unsqueeze(0).to(self.device)
+            ht = torch.from_numpy(hist if hlen else np.zeros((0, HISTORY_EVENT_DIM), dtype=np.float32)).float().unsqueeze(0).to(self.device)
             hl = torch.tensor([hlen], dtype=torch.long, device=self.device)
             at = torch.from_numpy(afeat).float().unsqueeze(0).to(self.device)
             logits, _, _ = self.model.score_actions(st, ht, hl, at)
@@ -223,8 +223,6 @@ class ISMCTSPlayer:
 
     def _opp_belief(self, infoset):
         """Per-rank probability estimate for the opponent's hand from the belief head."""
-        from encoder import encode_state
-        from train_ppo import HISTORY_EVENT_DIM, RANKS, encode_history_events
         state = encode_state(infoset)
         hist = encode_history_events(infoset)
         with torch.no_grad():
@@ -238,9 +236,6 @@ class ISMCTSPlayer:
 
     def _policy_priors(self, infoset):
         """Softmax policy priors and value for all legal actions."""
-        from encoder import encode_state, encode_move
-        from train_ppo import encode_history_events
-        from train_ppo import HISTORY_EVENT_DIM
         legal = infoset["legal_actions"]
         state = encode_state(infoset)
         hist = encode_history_events(infoset)
@@ -259,7 +254,6 @@ class ISMCTSPlayer:
     def _determinize(self, infoset, me, belief, floor=0.15):
         """Sample a determinization of the hidden state (opponent's hand + deck)
         weighted by the belief head's per-rank estimates."""
-        from train_ppo import ALL_CARDS
         opp = 1 - me
         seen = set((c.rank, c.suit or "") for c in infoset["hand"])
         for c in infoset["played_cards"]:
@@ -276,7 +270,6 @@ class ISMCTSPlayer:
             idx_set = set(idx.tolist())
             opp_hand = [unseen[i] for i in idx]
             deck = [unseen[i] for i in range(len(unseen)) if i not in idx_set]
-        from game import RANKS, HISTORY_MAXLEN
         played = list(infoset["played_cards"])
         prc = {r: 0 for r in RANKS}
         for c in played: prc[c.rank] += 1

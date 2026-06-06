@@ -111,3 +111,26 @@ def state(session_id: str):
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found.")
     return ctrl.state_payload()
+
+
+# --- logged-game export (for pulling training data off the host) ------------
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
+
+
+def _require_admin(key: Optional[str]):
+    if not ADMIN_TOKEN or key != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden.")
+
+
+@app.get("/api/games/list")
+def games_list(key: Optional[str] = None):
+    _require_admin(key)
+    games = sessions.logger.list_games()
+    return {"count": len(games), "games": games}
+
+
+@app.get("/api/games/export")
+def games_export(key: Optional[str] = None):
+    _require_admin(key)
+    records = sessions.logger.export_all()
+    return {"count": len(records), "games": records}

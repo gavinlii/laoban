@@ -53,6 +53,26 @@ VALUE_COEF = 0.75
 AUX_COEF = 0.40
 LOOKAHEAD_COEF = 0.25
 
+# Value-target mode (improvement "D"). The default PPO/GAE return,
+# returns[t] = A_GAE[t] + V(s_t), bootstraps the value target off the value net's
+# OWN predictions -> a self-consistency critic that under-represents long-horizon
+# option value (the future worth of HOLDING a joker / bomb instead of spending it).
+# That is exactly why search (IS-MCTS) — which leans on the value at its leaves —
+# underperformed. With MC_VALUE_TARGETS=True the value head is instead regressed
+# onto the realized Monte-Carlo return-to-go (terminal-bootstrapped with the EXACT
+# endgame value), so V learns true outcomes / option value. The POLICY still uses
+# the low-variance GAE advantage; only the value *target* changes.
+MC_VALUE_TARGETS = True
+
+# Ablation knob (lean vs fat). The belief subsystem (opp-hand prediction heads +
+# fusion into the decision context) measured only ~+1.5% skill over a base-rate
+# predictor in-distribution and is suspected dead weight that hurts off-distribution
+# (human) play. With USE_BELIEF=False the policy/value condition on the raw context
+# (ctx0) and the belief is NOT fused; pair with AUX_COEF=0 so the unused heads aren't
+# trained. The belief_fuse layer still exists (checkpoint stays format-compatible),
+# it's just bypassed. Toggle via --no-belief.
+USE_BELIEF = True
+
 POINT_SCALE = 10.0
 
 # Potential-based reward shaping for control-card economy. beta=0 disables it
@@ -94,7 +114,7 @@ FRONTIER_SIZE = 4
 
 # Prioritized fictitious self-play (PFSP): sample opponents we are NOT beating.
 PFSP_ETA = 2.0          # V3 value
-PFSP_FLOOR = 0.04       # keep a little probability on already-beaten opponents
+PFSP_FLOOR = 0.01       # let mastered (esp. scripted) opponents fade harder; was 0.04
 PFSP_MIN_GAMES = 6      # below this many games an opponent is sampled optimistically
 PFSP_DECAY = 0.99       # exponential forgetting so stats track the *current* policy
 SELF_SHARE = 0.15       # fraction of games reserved for vanilla self-play
@@ -362,12 +382,107 @@ class AggressivePointPlayer:
         return min(non_pass, key=lambda a: (move_points(a), max(c.rank for c in move_obj(a).cards)))
 
 
+class OverextensionPunisherPlayer:
+    """Punishes a policy that over-spends control cards (the reported failure
+    mode: jokers on aces, point cards dumped on nothing, bombs never saved).
+
+    Unlike ControlHoarder (patient but passive), this archetype *actively
+    exploits* over-extension:
+      - Bait: when leading, play the cheapest, lowest, non-control, non-bomb
+        junk to coax the opponent into committing a high card / feeding points.
+      - Minimum-sufficient force: when following a pot worth contesting, win it
+        with the LOWEST card that takes it -- never overpay, always keep the
+        bigger control cards in reserve.
+      - Pot discipline: pass on low/zero-point pots to deny the opponent free
+        trades, forcing it to keep leading and bleeding cards.
+      - Bomb reserve: spend a bomb only on a genuinely point-rich pot, and then
+        the *weakest* sufficient bomb.
+
+    Against an over-extending opponent this player ends up holding A/2/jokers
+    and bombs into the point-rich late pots, capturing exactly the points the
+    opponent fed in. PFSP will up-weight it whenever it beats the main policy,
+    forcing the policy to learn control-card discipline.
+    """
+    HIGH = 14          # Ace and above count as 'control'
+    WORTH_POT = 10     # only commit control/bomb to pots worth at least this
+
+    def act(self, infoset):
+        legal = infoset["legal_actions"]
+        non_pass = [a for a in legal if a is not None]
+        if not non_pass:
+            return None
+        pot = infoset.get("current_pot", 0)
+        leading = infoset.get("hand_type") is None
+        can_pass = None in legal
+
+        def maxrank(a):    return max(c.rank for c in move_obj(a).cards)
+        def is_bomb(a):    return move_obj(a).type == "bomb"
+        def is_control(a): return any(c.rank >= self.HIGH for c in move_obj(a).cards)
+
+        if leading:
+            # Bait: lead the cheapest, lowest junk; never open with control/bombs.
+            junk = [a for a in non_pass if not is_control(a) and not is_bomb(a)]
+            pool = junk or [a for a in non_pass if not is_bomb(a)] or non_pass
+            return min(pool, key=lambda a: (move_points(a), maxrank(a), len(move_obj(a).cards)))
+
+        # Following. Prefer to win cheaply with junk; otherwise weigh the pot.
+        non_bomb = [a for a in non_pass if not is_bomb(a)]
+        bombs    = [a for a in non_pass if is_bomb(a)]
+
+        cheap_win = [a for a in non_bomb if not is_control(a)]
+        if cheap_win:                      # take it without spending control
+            return min(cheap_win, key=lambda a: (move_points(a), maxrank(a)))
+
+        if pot >= self.WORTH_POT:          # worth committing reserve to
+            if non_bomb:                   # minimum-sufficient control card
+                return min(non_bomb, key=lambda a: (maxrank(a), move_points(a)))
+            if bombs:                      # weakest sufficient bomb, point-rich pot only
+                return min(bombs, key=lambda a: (move_obj(a).strength, move_points(a)))
+
+        if can_pass:                       # not worth it -> deny the trade
+            return None
+        return min(non_pass, key=lambda a: (is_bomb(a), maxrank(a), move_points(a)))
+
+
+class _EpsilonScripted:
+    """Wraps a deterministic scripted player with epsilon-random exploration.
+
+    The legacy heuristics are pure argmin/argmax functions of the infoset, so a
+    learner can memorize an exact, non-transferable counter-sequence ("beat THIS
+    bot" rather than "play well"). Mixing in epsilon uniformly-random legal moves
+    converts each bot from a memorizable puzzle into a *style distribution*: the
+    policy still faces the heuristic's tendencies (1-eps of the time) but can no
+    longer overfit a brittle exact counter. Keeps league diversity, kills the
+    overfitting that was muddying the signal."""
+    def __init__(self, base, epsilon=0.12):
+        self.base = base
+        self.epsilon = epsilon
+        self.wants_concrete_same_rank_choices = getattr(base, "wants_concrete_same_rank_choices", False)
+
+    def act(self, infoset):
+        legal = infoset["legal_actions"]
+        if len(legal) > 1 and random.random() < self.epsilon:
+            return random.choice(legal)
+        return self.base.act(infoset)
+
+
+SCRIPTED_EPSILON = 0.12
+
+
+def _eps_builder(cls):
+    return lambda: _EpsilonScripted(cls(), SCRIPTED_EPSILON)
+
+
 SCRIPTED_BUILDERS: Dict[str, Callable[[], object]] = {
-    "trap_bomb": TrapBombPlayer,
-    "point_denial": PointDenialPlayer,
-    "endgame_conserver": EndgameConserverPlayer,
-    "control_hoarder": ControlHoarderPlayer,
-    "aggressive_point": AggressivePointPlayer,
+    # Legacy style heuristics: epsilon-randomized so they can't be memorized.
+    "trap_bomb": _eps_builder(TrapBombPlayer),
+    "point_denial": _eps_builder(PointDenialPlayer),
+    "endgame_conserver": _eps_builder(EndgameConserverPlayer),
+    "control_hoarder": _eps_builder(ControlHoarderPlayer),
+    "aggressive_point": _eps_builder(AggressivePointPlayer),
+    # Punisher stays deterministic: its job is targeted pressure on the
+    # control-waste blind spot, not generalization, so consistent pressure helps.
+    "overextension_punisher": OverextensionPunisherPlayer,
 }
 
 
@@ -449,6 +564,9 @@ class HistoryBeliefPVNet(nn.Module):
             torch.sigmoid(aux["opp_empty2"]).unsqueeze(-1),
             torch.sigmoid(aux["opp_points"]).unsqueeze(-1),
         ], dim=-1).detach()
+        if not USE_BELIEF:
+            # Lean ablation: skip belief fusion; decide on the raw context only.
+            return ctx0, aux
         ctx = self.belief_fuse(torch.cat([ctx0, belief], dim=-1))
         return ctx, aux
 
@@ -918,6 +1036,21 @@ def compute_gae(rewards, values, bootstrap=0.0):
         advantages.insert(0, gae)
     returns = [a + v for a, v in zip(advantages, values[:-1])]
     return advantages, returns
+
+
+def compute_mc_returns(rewards, bootstrap=0.0):
+    """Monte-Carlo discounted return-to-go from each step, terminal-bootstrapped
+    with `bootstrap` (the exact endgame value / win bonus). Unlike compute_gae's
+    returns, these NEVER reference the value net, so regressing V onto them makes
+    the value head an outcome critic (option value) rather than a self-consistency
+    critic. Used as the value target when MC_VALUE_TARGETS is on; the GAE advantage
+    is still used for the policy update."""
+    returns = [0.0] * len(rewards)
+    g = bootstrap
+    for t in reversed(range(len(rewards))):
+        g = rewards[t] + GAMMA * g
+        returns[t] = g
+    return returns
 
 
 def is_critical_state(infoset):
@@ -1397,7 +1530,10 @@ def collect_rollout(model, pool, episode, replay_buffer: Optional[Deque[dict]] =
         outcome = (opp_entry.id, int(margin > 0))
 
     values = [d.value for d in storage]
-    advantages, returns = compute_gae(rewards, values, bootstrap)
+    advantages, td_returns = compute_gae(rewards, values, bootstrap)
+    # Policy keeps the GAE advantage; the value head regresses onto MC returns when
+    # enabled (outcome/option-value critic) instead of the self-referential TD return.
+    returns = compute_mc_returns(rewards, bootstrap) if MC_VALUE_TARGETS else td_returns
     return storage, advantages, returns, stats, outcome
 
 
@@ -1767,12 +1903,14 @@ def save_perf_plot(history, path: str = PERF_PNG_PATH):
 
 def _apply_worker_globals(config):
     """Set the module globals a spawned worker needs (it re-imports this module)."""
-    global DEVICE, SHAPING_BETA, WIN_BONUS, USE_LOOKAHEAD, USE_ENDGAME_SOLVER
+    global DEVICE, SHAPING_BETA, WIN_BONUS, USE_LOOKAHEAD, USE_ENDGAME_SOLVER, USE_BELIEF, MC_VALUE_TARGETS
     DEVICE = torch.device("cpu")
     SHAPING_BETA = config["shaping_beta"]
     WIN_BONUS = config["win_bonus"]
     USE_LOOKAHEAD = config["use_lookahead"]
     USE_ENDGAME_SOLVER = config["use_endgame_solver"]
+    USE_BELIEF = config.get("use_belief", True)
+    MC_VALUE_TARGETS = config.get("mc_value_targets", True)
     try:
         torch.set_num_threads(1)        # one core per worker -> no BLAS oversubscription
         torch.set_num_interop_threads(1)
@@ -1893,6 +2031,8 @@ def make_worker_config(state_dim, action_dim, hidden, hist_hidden, seed, use_rep
         "win_bonus": WIN_BONUS,
         "use_lookahead": USE_LOOKAHEAD,
         "use_endgame_solver": USE_ENDGAME_SOLVER,
+        "use_belief": USE_BELIEF,
+        "mc_value_targets": MC_VALUE_TARGETS,
         "use_replay": use_replay,
     }
 
@@ -2111,11 +2251,15 @@ def main(device="auto", init_checkpoint=None, baseline_checkpoint=None, episodes
          rollouts_per_batch=ROLLOUTS_PER_BATCH, num_workers=0, lr=LR, epochs=EPOCHS,
          shaping_beta=SHAPING_BETA, win_bonus=WIN_BONUS, use_lookahead=USE_LOOKAHEAD,
          resume=False, state_freq=50, seed=0, out_dir=".", hidden=256, hist_hidden=160,
-         use_endgame_solver=USE_ENDGAME_SOLVER):
-    global DEVICE, SHAPING_BETA, WIN_BONUS, USE_LOOKAHEAD, LR, EPOCHS, USE_ENDGAME_SOLVER
+         use_endgame_solver=USE_ENDGAME_SOLVER, use_belief=USE_BELIEF):
+    global DEVICE, SHAPING_BETA, WIN_BONUS, USE_LOOKAHEAD, LR, EPOCHS, USE_ENDGAME_SOLVER, USE_BELIEF, AUX_COEF
     DEVICE = select_device(device)
     SHAPING_BETA, WIN_BONUS, USE_LOOKAHEAD, LR, EPOCHS = shaping_beta, win_bonus, use_lookahead, lr, epochs
     USE_ENDGAME_SOLVER = use_endgame_solver
+    USE_BELIEF = use_belief
+    if not USE_BELIEF:
+        AUX_COEF = 0.0  # don't train the unused belief heads in the lean ablation
+        print("[ablation] USE_BELIEF=False -> belief fusion bypassed, AUX_COEF=0 (lean run)", flush=True)
     os.makedirs(out_dir, exist_ok=True)
     ckpt_latest = os.path.join(out_dir, CHECKPOINT_LATEST)
     ckpt_best = os.path.join(out_dir, CHECKPOINT_BEST)
@@ -2342,7 +2486,8 @@ def parse_train_args(argv: List[str]):
     parser.add_argument("--win-bonus", type=float, default=WIN_BONUS)
     parser.add_argument("--lookahead", action="store_true", help="enable (expensive) PIMC lookahead distillation during training")
     parser.add_argument("--no-endgame-solver", dest="endgame_solver", action="store_false", help="disable exact endgame-value bootstrapping")
-    parser.set_defaults(endgame_solver=True)
+    parser.add_argument("--no-belief", dest="use_belief", action="store_false", help="lean ablation: bypass belief fusion + AUX_COEF=0")
+    parser.set_defaults(endgame_solver=True, use_belief=True)
     parser.add_argument("--resume", action="store_true", help="resume from <out-dir>/train_state.pt if present")
     parser.add_argument("--state-freq", type=int, default=50, help="episodes between training-state checkpoints (0 disables)")
     parser.add_argument("--seed", type=int, default=0)
@@ -2386,4 +2531,5 @@ if __name__ == "__main__":
             hidden=args.hidden,
             hist_hidden=args.hist_hidden,
             use_endgame_solver=args.endgame_solver,
+            use_belief=args.use_belief,
         )

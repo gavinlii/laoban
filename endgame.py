@@ -20,7 +20,21 @@ The solver mirrors GameEnv's deck-empty rules exactly:
 from collections import Counter
 from functools import lru_cache
 
-from game import Card, Move, MoveGenerator, POINT_VALUES
+from game import Card, Move, MoveGenerator, POINT_VALUES, RANKS, SUITS, SMALL_JOKER, BIG_JOKER
+
+
+def _build_all_cards():
+    cards = []
+    for r in RANKS:
+        if r in (SMALL_JOKER, BIG_JOKER):
+            cards.append(Card(r))
+        else:
+            for s in SUITS:
+                cards.append(Card(r, s))
+    return cards
+
+
+ALL_CARDS = _build_all_cards()  # the full 54-card deck (one of each)
 
 
 def _pts(cards):
@@ -215,7 +229,6 @@ class EndgameSolverPlayer:
 
 def endgame_act_from_infoset(infoset):
     """At the endgame the opponent's hand == the unseen cards, so we can solve exactly."""
-    from train_ppo import ALL_CARDS  # the full 54-card list
     me = infoset["player_index"]
     seen = set((c.rank, c.suit or "") for c in infoset["hand"])
     for c in infoset["played_cards"]:

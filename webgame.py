@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 from game import Card, GameEnv, Move, RandomPlayer
 from endgame import EndgameSolverPlayer, endgame_act_from_infoset
 from policy_loader import LoadedPolicy
+from game_logger import GameLogger
 
 HISTORY_MAXLEN = 200   # enough for a full game's public events
 
@@ -40,6 +41,24 @@ def move_text(move) -> str:
     return f"{m.type.upper()}  {'  '.join(card_label(c) for c in cards)}"
 
 
+def _action_key(action):
+    """Value key for an action (None for pass). Lets us match actions across the
+    legal list without relying on Move identity (Move has no __eq__)."""
+    if action is None:
+        return None
+    cards = action.cards if isinstance(action, Move) else action
+    return tuple(sorted((c.rank, c.suit or "") for c in cards))
+
+
+def _action_index(legal, action) -> int:
+    """Index of `action` within `legal` by value. -1 if not found."""
+    target = _action_key(action)
+    for i, a in enumerate(legal):
+        if _action_key(a) == target:
+            return i
+    return -1
+
+
 class _PolicyPlayer:
     """Thin wrapper so EndgameSolverPlayer can call .act(infoset)."""
     def __init__(self, policy: LoadedPolicy):
@@ -53,6 +72,7 @@ class WebMatchController:
     policy: LoadedPolicy
     bot_first: bool = False
     seed: Optional[int] = None
+    logger: Optional[GameLogger] = None
 
     session_id: str        = field(init=False, default_factory=lambda: uuid.uuid4().hex)
     human_seat: int        = field(init=False, default=0)
@@ -63,10 +83,29 @@ class WebMatchController:
     human_wins: int        = field(init=False, default=0)
     bot_wins: int          = field(init=False, default=0)
     _game_counted: bool    = field(init=False, default=False)
+    _decisions: list       = field(init=False, default_factory=list)
 
     def __post_init__(self):
-        self.bot_player = EndgameSolverPlayer(_PolicyPlayer(self.policy))
+        self.bot_player = self._build_bot_player()
         self.reset(initial=True)
+
+    def _build_bot_player(self):
+        """Default: raw policy + exact endgame solver (fast, the validated path).
+
+        Opt-in (improvement "D"): set USE_SEARCH=1 to drive the bot with IS-MCTS
+        (policy priors + value-net leaves + exact endgame nodes). Search only helps
+        once the value head is trained on MC returns (MC_VALUE_TARGETS) — with the
+        old self-consistency critic it underperforms the raw policy, so it stays
+        off until an MC-trained checkpoint is deployed. SEARCH_SIMS tunes strength
+        vs. latency (each sim deep-copies the env, so it is much slower on CPU)."""
+        import os
+        if os.getenv("USE_SEARCH", "0") != "0":
+            from mcts import ISMCTSPlayer
+            from policy_loader import DEVICE
+            sims = int(os.getenv("SEARCH_SIMS", "120"))
+            # ISMCTSPlayer resolves deck-empty nodes with the exact solver itself.
+            return ISMCTSPlayer(self.policy.model, DEVICE, simulations=sims)
+        return EndgameSolverPlayer(_PolicyPlayer(self.policy))
 
     # ------------------------------------------------------------------
     def reset(self, initial: bool = False):
@@ -82,6 +121,7 @@ class WebMatchController:
             self.bot_seat  = 1 - starter
         self.log = ["Game started", "Bot leads" if self.bot_first else "You lead"]
         self._game_counted = False
+        self._decisions = []
         if not initial:
             self._autoplay_bot()
 
@@ -109,11 +149,41 @@ class WebMatchController:
             self.log.append(f"{name} {verb} {move_text(action)} (+{pts})")
         self.env.apply_action(action)
 
+    def _log_decision(self, infoset, action, is_human: bool):
+        """Encode the (state, legal actions, chosen action, history) into the
+        per-decision training record and buffer it for this game."""
+        if self.logger is None or not self.logger.enabled:
+            return
+        legal = infoset["legal_actions"]
+        chosen_idx = _action_index(legal, action)  # value-match (handles solver-built cards)
+        try:
+            self._decisions.append(self.logger.encode_decision(infoset, chosen_idx, is_human))
+        except Exception:
+            pass  # never let logging break gameplay
+
+    def _flush_game(self):
+        if self.logger is None or not self.logger.enabled:
+            return
+        try:
+            self.logger.write_game(
+                session_id=self.session_id,
+                bot_first=self.bot_first,
+                human_seat=self.human_seat,
+                bot_seat=self.bot_seat,
+                human_points=self.env.points[self.human_seat],
+                bot_points=self.env.points[self.bot_seat],
+                decisions=self._decisions,
+            )
+        except Exception:
+            pass
+        self._decisions = []
+
     def _autoplay_bot(self, max_steps: int = 400):
         steps = 0
         while not self.env.done and self._is_bot_turn() and steps < max_steps:
             infoset = self.env.get_infoset(self.bot_seat)
             action  = self.bot_player.act(infoset)
+            self._log_decision(infoset, action, is_human=False)
             self._do_apply(action)
             steps += 1
         self._count_finished_game()
@@ -126,6 +196,7 @@ class WebMatchController:
         if hp > bp:  self.human_wins += 1
         elif bp > hp: self.bot_wins  += 1
         self._game_counted = True
+        self._flush_game()
 
     # ------------------------------------------------------------------
     def human_play_by_index(self, action_index: int):
@@ -135,6 +206,7 @@ class WebMatchController:
         legal   = infoset["legal_actions"]
         if action_index < 0 or action_index >= len(legal):
             raise IndexError("Action index out of range.")
+        self._log_decision(infoset, legal[action_index], is_human=True)
         self._do_apply(legal[action_index])
         self._count_finished_game()
 
@@ -226,12 +298,14 @@ class WebMatchController:
 
 
 class SessionStore:
-    def __init__(self, policy: LoadedPolicy):
+    def __init__(self, policy: LoadedPolicy, logger: Optional[GameLogger] = None):
         self.policy   = policy
+        self.logger   = logger if logger is not None else GameLogger()
         self.sessions: Dict[str, WebMatchController] = {}
 
     def create(self, bot_first: bool = False, seed: Optional[int] = None) -> WebMatchController:
-        ctrl = WebMatchController(policy=self.policy, bot_first=bot_first, seed=seed)
+        ctrl = WebMatchController(policy=self.policy, bot_first=bot_first,
+                                  seed=seed, logger=self.logger)
         ctrl.bot_play_if_needed()
         self.sessions[ctrl.session_id] = ctrl
         return ctrl

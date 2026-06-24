@@ -35,8 +35,13 @@ def is_bomb(m):
     return m is not None and (m if isinstance(m, Move) else Move(m)).type == "bomb"
 
 
+def is_ace_or_two(m):
+    return m is not None and any(c.rank in (14, 17) for c in _cards(m))
+
+
 def probe(model, belief, n=150, seed0=0):
     temptations = wastes = joker_wastes = 0
+    a2_zero = control_zero = 0          # true-waste (A/2 on 0-pot; any A/2/joker on 0-pot)
     control_commits = 0
     pots_when_control = []
     for g in range(n):
@@ -56,19 +61,28 @@ def probe(model, belief, n=150, seed0=0):
                 if committed:
                     control_commits += 1
                     pots_when_control.append(pot)
-                # "temptation": cheap pot, and a cheaper way out existed
+                # TRUE waste (per the real strategy): A/2/joker on a ZERO-point pot
+                # when an out existed and it's not a bomb. (2/Ace on point pots is fine.)
+                if pot == 0 and (can_pass or has_cheap) and not is_bomb(move):
+                    if is_joker(move):
+                        joker_wastes += 1
+                        control_zero += 1
+                    elif is_ace_or_two(move):
+                        a2_zero += 1
+                        control_zero += 1
+                # legacy temptation/waste-rate (kept for continuity; over-counts good plays)
                 if pot < 5 and (can_pass or has_cheap):
                     temptations += 1
                     if committed:
                         wastes += 1
-                    if is_joker(move) and pot == 0:
-                        joker_wastes += 1
             env.apply_action(move)
             steps += 1
     return {
         "temptations": temptations,
         "waste_rate": wastes / max(1, temptations),
         "joker_waste_per_game": joker_wastes / n,
+        "ace2_on_zero_per_game": a2_zero / n,
+        "control_on_zero_per_game": control_zero / n,   # TRUE-waste aggregate
         "avg_pot_when_committing_control": float(np.mean(pots_when_control)) if pots_when_control else 0.0,
         "control_commits": control_commits,
     }
@@ -83,6 +97,7 @@ if __name__ == "__main__":
     m, ep = load(args.ckpt)
     s = probe(m, bool(args.belief), n=args.n)
     print(f"{args.ckpt} (ep {ep}, belief={bool(args.belief)}), {args.n} games:")
-    print(f"  waste-rate (overspend control/bomb on cheap pot w/ an out): {s['waste_rate']:.3f}  over {s['temptations']} temptations")
-    print(f"  joker-on-zero-pot per game: {s['joker_waste_per_game']:.3f}")
+    print(f"  TRUE WASTE control(A/2/joker)-on-zero-pot per game: {s['control_on_zero_per_game']:.3f}")
+    print(f"     of which joker-on-zero-pot: {s['joker_waste_per_game']:.3f}   ace/2-on-zero-pot: {s['ace2_on_zero_per_game']:.3f}")
+    print(f"  (legacy) waste-rate control/bomb on pot<5 w/ out: {s['waste_rate']:.3f} over {s['temptations']} temptations  [over-counts good plays]")
     print(f"  avg pot when committing a control card/bomb: {s['avg_pot_when_committing_control']:.1f}  (higher=more disciplined)")

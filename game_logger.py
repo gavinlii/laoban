@@ -48,6 +48,9 @@ class GameLogger:
         self._lock = threading.Lock()
         if self.enabled:
             self.dir.mkdir(parents=True, exist_ok=True)
+        # Durable mirror (survives Render's ephemeral disk). No-op unless SUPABASE_* set.
+        from supabase_store import SupabaseGameStore
+        self.supabase = SupabaseGameStore()
 
     # -- per-decision encoding ------------------------------------------------
     def encode_decision(self, infoset, chosen_idx: int, is_human: bool) -> dict:
@@ -102,6 +105,13 @@ class GameLogger:
         with self._lock:
             with open(path, "w") as f:
                 json.dump(record, f)
+
+        # Mirror to durable storage in a daemon thread so the HTTP POST never
+        # blocks the API response (and a Supabase outage can't break gameplay).
+        if self.supabase.enabled:
+            threading.Thread(
+                target=self.supabase.insert, args=(record,), daemon=True
+            ).start()
         return str(path)
 
     # -- export helpers (for pulling data off an ephemeral host) --------------

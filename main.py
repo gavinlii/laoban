@@ -49,8 +49,10 @@ def root():
     return {"ok": True, "message": "laoban.cards backend", "health": "/health"}
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
+    # HEAD is accepted too so uptime monitors (UptimeRobot defaults to HEAD)
+    # don't get a 405 and mark the service down.
     return {
         "ok": True,
         "checkpoint": policy.path,

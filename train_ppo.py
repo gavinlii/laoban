@@ -73,6 +73,21 @@ MC_VALUE_TARGETS = True
 # it's just bypassed. Toggle via --no-belief.
 USE_BELIEF = True
 
+# --- Conservation penalty (lever "C") ---------------------------------------
+# A REAL (non-potential, optimum-changing) reward penalty for spending precious
+# control cards / bombs on a cheap, avoidable pot. Unlike shaping.py's PBRS (which
+# is policy-invariant and therefore cannot change converged behavior), this term
+# deliberately biases the optimum toward conservation -- the only way to inject
+# discipline that self-play structurally will not, since a self-play opponent does
+# not punish waste. Fires ONLY when: the model is following (a pass/cheaper option
+# existed), the pot is below CONSERVE_POT_THRESHOLD points, and the move is not a
+# hand-emptying (go-out) play. Penalty scales with the preciousness of the cards
+# spent and how cheap the pot is. Set via --conserve-penalty (0 = off).
+CONSERVE_PENALTY_COEF = 0.0
+CONSERVE_POT_THRESHOLD = 10.0
+CONSERVE_UTILITY = {14: 1.0, 17: 1.6, 20: 2.2, 30: 3.2}  # A, 2, small joker, big joker
+CONSERVE_BOMB_UTILITY = 1.5
+
 POINT_SCALE = 10.0
 
 # Potential-based reward shaping for control-card economy. beta=0 disables it
@@ -1433,6 +1448,69 @@ def effective_shaping_beta(episode):
     return SHAPING_BETA * max(0.0, 1.0 - episode / float(SHAPING_ANNEAL_EPISODES))
 
 
+def conservation_penalty(move, infoset):
+    """Penalty (in POINTS, >=0) for *genuinely* wasting high-utility control cards,
+    per the real strategy of the game (not a crude pot<threshold rule):
+
+      * Using a 2 / Ace to win a pot with ANY points is usually correct -> never penalized.
+      * The true waste is dumping an A/2/joker on a ZERO-point pot. Penalized,
+        scaled by preciousness (A 1.0, 2 1.6, small joker 2.2, big joker 3.2).
+      * A joker on a small (>0) point pot is wasteful only if the joker BOMB is still
+        live for us (the other joker hasn't hit the table); otherwise the lone joker
+        is just a high single and spending it is fine. Penalty scales down as the pot
+        grows toward CONSERVE_POT_THRESHOLD.
+      * BOMBS are never penalized -- bombing a dead pot can be a high-EV tempo play.
+
+    Carve-outs (return 0): leading, control forced (no pass/cheaper out), a hand-emptying
+    (go-out) move, or a small hand (<=3) -- the dead-hand case (e.g. 3 3 4 6 2) where
+    spending control to clear otherwise-stuck cards is fine."""
+    if CONSERVE_PENALTY_COEF <= 0.0 or move is None:
+        return 0.0
+    if move_obj(move).type == "bomb":
+        return 0.0  # bombs are never "waste" here
+    if infoset.get("hand_type") is None:
+        return 0.0  # leading is a legitimate tempo probe
+    cards = move.cards if isinstance(move, Move) else move
+    hand = infoset.get("hand", [])
+    if len(cards) >= len(hand):
+        return 0.0  # hand-emptying / go-out play
+    if len(hand) <= 3:
+        return 0.0  # dead-hand / endgame dump -- conserving no longer matters
+
+    legal = infoset["legal_actions"]
+
+    def controlish(a):
+        cs = a.cards if isinstance(a, Move) else a
+        return any(c.rank >= 14 for c in cs) or move_obj(a).type == "bomb"
+
+    can_pass = any(a is None for a in legal)
+    has_cheaper = any(a is not None and not controlish(a) for a in legal)
+    if not (can_pass or has_cheaper):
+        return 0.0  # control was forced -- no avoidable waste
+
+    pot = infoset.get("current_pot", 0)
+    ranks = [c.rank for c in cards]
+
+    if pot == 0:
+        # True waste: any A/2/joker dumped on a zero-point pot, full preciousness.
+        util = sum(CONSERVE_UTILITY.get(r, 0.0) for r in ranks)
+        return CONSERVE_PENALTY_COEF * util if util > 0.0 else 0.0
+
+    # Pot has points: A/2 are fine. Only a joker can be waste, and only if its bomb is
+    # still live (the other joker has not been played) and the pot is still small.
+    joker_ranks = [r for r in ranks if r in (SMALL_JOKER, BIG_JOKER)]
+    if not joker_ranks or pot >= CONSERVE_POT_THRESHOLD:
+        return 0.0
+    played = infoset.get("played_cards", [])
+    played_jokers = {c.rank for c in played if c.rank in (SMALL_JOKER, BIG_JOKER)}
+    other = BIG_JOKER if joker_ranks[0] == SMALL_JOKER else SMALL_JOKER
+    if other in played_jokers:
+        return 0.0  # bomb already dead -> lone joker is just a high single, fine to spend
+    util = sum(CONSERVE_UTILITY.get(r, 0.0) for r in joker_ranks)
+    cheapness = 1.0 - pot / CONSERVE_POT_THRESHOLD
+    return CONSERVE_PENALTY_COEF * util * cheapness
+
+
 def collect_rollout(model, pool, episode, replay_buffer: Optional[Deque[dict]] = None):
     storage: List[Transition] = []
     rewards: List[float] = []
@@ -1499,6 +1577,11 @@ def collect_rollout(model, pool, episode, replay_buffer: Optional[Deque[dict]] =
             reward_acc += env.points[model_seat] - env.points[1 - model_seat] - pre_margin_inner
 
         storage[-1].reward = reward_acc / POINT_SCALE
+        if CONSERVE_PENALTY_COEF > 0.0:
+            pen = conservation_penalty(act, infoset)  # points
+            if pen > 0.0:
+                storage[-1].reward -= pen / POINT_SCALE
+                stats["conserve_penalized"] += 1
         rewards.append(storage[-1].reward)
         total_model_decisions += 1
         stats["decisions"] += 1
@@ -1903,7 +1986,7 @@ def save_perf_plot(history, path: str = PERF_PNG_PATH):
 
 def _apply_worker_globals(config):
     """Set the module globals a spawned worker needs (it re-imports this module)."""
-    global DEVICE, SHAPING_BETA, WIN_BONUS, USE_LOOKAHEAD, USE_ENDGAME_SOLVER, USE_BELIEF, MC_VALUE_TARGETS
+    global DEVICE, SHAPING_BETA, WIN_BONUS, USE_LOOKAHEAD, USE_ENDGAME_SOLVER, USE_BELIEF, MC_VALUE_TARGETS, CONSERVE_PENALTY_COEF
     DEVICE = torch.device("cpu")
     SHAPING_BETA = config["shaping_beta"]
     WIN_BONUS = config["win_bonus"]
@@ -1911,6 +1994,7 @@ def _apply_worker_globals(config):
     USE_ENDGAME_SOLVER = config["use_endgame_solver"]
     USE_BELIEF = config.get("use_belief", True)
     MC_VALUE_TARGETS = config.get("mc_value_targets", True)
+    CONSERVE_PENALTY_COEF = config.get("conserve_penalty", 0.0)
     try:
         torch.set_num_threads(1)        # one core per worker -> no BLAS oversubscription
         torch.set_num_interop_threads(1)
@@ -2033,6 +2117,7 @@ def make_worker_config(state_dim, action_dim, hidden, hist_hidden, seed, use_rep
         "use_endgame_solver": USE_ENDGAME_SOLVER,
         "use_belief": USE_BELIEF,
         "mc_value_targets": MC_VALUE_TARGETS,
+        "conserve_penalty": CONSERVE_PENALTY_COEF,
         "use_replay": use_replay,
     }
 
@@ -2251,15 +2336,19 @@ def main(device="auto", init_checkpoint=None, baseline_checkpoint=None, episodes
          rollouts_per_batch=ROLLOUTS_PER_BATCH, num_workers=0, lr=LR, epochs=EPOCHS,
          shaping_beta=SHAPING_BETA, win_bonus=WIN_BONUS, use_lookahead=USE_LOOKAHEAD,
          resume=False, state_freq=50, seed=0, out_dir=".", hidden=256, hist_hidden=160,
-         use_endgame_solver=USE_ENDGAME_SOLVER, use_belief=USE_BELIEF):
-    global DEVICE, SHAPING_BETA, WIN_BONUS, USE_LOOKAHEAD, LR, EPOCHS, USE_ENDGAME_SOLVER, USE_BELIEF, AUX_COEF
+         use_endgame_solver=USE_ENDGAME_SOLVER, use_belief=USE_BELIEF, conserve_penalty=0.0):
+    global DEVICE, SHAPING_BETA, WIN_BONUS, USE_LOOKAHEAD, LR, EPOCHS, USE_ENDGAME_SOLVER, USE_BELIEF, AUX_COEF, CONSERVE_PENALTY_COEF
     DEVICE = select_device(device)
     SHAPING_BETA, WIN_BONUS, USE_LOOKAHEAD, LR, EPOCHS = shaping_beta, win_bonus, use_lookahead, lr, epochs
     USE_ENDGAME_SOLVER = use_endgame_solver
     USE_BELIEF = use_belief
+    CONSERVE_PENALTY_COEF = conserve_penalty
     if not USE_BELIEF:
         AUX_COEF = 0.0  # don't train the unused belief heads in the lean ablation
         print("[ablation] USE_BELIEF=False -> belief fusion bypassed, AUX_COEF=0 (lean run)", flush=True)
+    if CONSERVE_PENALTY_COEF > 0.0:
+        print(f"[lever C] conservation penalty ON, coef={CONSERVE_PENALTY_COEF} "
+              f"(pot<{CONSERVE_POT_THRESHOLD} avoidable control/bomb waste)", flush=True)
     os.makedirs(out_dir, exist_ok=True)
     ckpt_latest = os.path.join(out_dir, CHECKPOINT_LATEST)
     ckpt_best = os.path.join(out_dir, CHECKPOINT_BEST)
@@ -2487,6 +2576,7 @@ def parse_train_args(argv: List[str]):
     parser.add_argument("--lookahead", action="store_true", help="enable (expensive) PIMC lookahead distillation during training")
     parser.add_argument("--no-endgame-solver", dest="endgame_solver", action="store_false", help="disable exact endgame-value bootstrapping")
     parser.add_argument("--no-belief", dest="use_belief", action="store_false", help="lean ablation: bypass belief fusion + AUX_COEF=0")
+    parser.add_argument("--conserve-penalty", type=float, default=0.0, help="lever C: reward penalty for wasting control/bombs on cheap pots (0=off)")
     parser.set_defaults(endgame_solver=True, use_belief=True)
     parser.add_argument("--resume", action="store_true", help="resume from <out-dir>/train_state.pt if present")
     parser.add_argument("--state-freq", type=int, default=50, help="episodes between training-state checkpoints (0 disables)")
@@ -2532,4 +2622,5 @@ if __name__ == "__main__":
             hist_hidden=args.hist_hidden,
             use_endgame_solver=args.endgame_solver,
             use_belief=args.use_belief,
+            conserve_penalty=args.conserve_penalty,
         )
